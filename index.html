@@ -1,0 +1,1805 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>ApexTelemetry - Criador de Pistas & Lap Timer</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dashBg: '#090d16',
+                        dashPanel: '#0f172a',
+                        dashBorder: '#1e293b',
+                        dashAccent: '#0ea5e9',
+                        dashYellow: '#f59e0b',
+                        dashRed: '#ef4444',
+                        dashGreen: '#10b981'
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'Consolas', 'Courier New', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Leaflet.js CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: #090d16; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 2px; }
+        
+        .glow-accent { box-shadow: 0 0 20px rgba(14, 165, 233, 0.4); }
+        .glow-red { box-shadow: 0 0 20px rgba(239, 68, 68, 0.4); }
+        .glow-green { box-shadow: 0 0 20px rgba(16, 185, 129, 0.4); }
+        .text-glow { text-shadow: 0 0 16px currentColor; }
+        .text-glow-lg { text-shadow: 0 0 28px currentColor; }
+
+        .bg-grid-dash {
+            background-size: 30px 30px;
+            background-image: 
+                linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+        }
+
+        * { user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+    </style>
+</head>
+<body class="bg-dashBg text-gray-100 font-sans h-full w-full overflow-hidden bg-grid-dash flex flex-col">
+
+    <!-- AVISO DE ORIENTAÇÃO VERTICAL -->
+    <div id="portraitOverlay" class="fixed inset-0 bg-dashBg/98 backdrop-blur-md z-[100] flex flex-col items-center justify-center p-6 text-center transition-opacity duration-300 md:hidden hidden">
+        <div class="w-20 h-20 rounded-2xl bg-dashPanel border border-dashAccent/40 flex items-center justify-center mb-4 animate-bounce shadow-xl">
+            <i data-lucide="rotate-cw" class="w-10 h-10 text-dashAccent"></i>
+        </div>
+        <h2 class="text-2xl font-black uppercase text-white tracking-wider mb-2">Vire o Celular</h2>
+        <p class="text-sm text-gray-400 max-w-xs">
+            Esta interface de telemetria e criação de pistas foi desenvolvida para <strong>Modo Horizontal (Paisagem)</strong> no suporte do volante.
+        </p>
+    </div>
+
+    <!-- CABEÇALHO COMPACTO -->
+    <header class="bg-dashPanel border-b border-dashBorder px-3 py-1.5 flex items-center justify-between z-30 shrink-0">
+        <div class="flex items-center space-x-3">
+            <div class="bg-dashAccent text-black px-2.5 py-0.5 rounded font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow">
+                <i data-lucide="gauge" class="w-3.5 h-3.5"></i> APEX TELEMETRY
+            </div>
+            
+            <!-- Indicadores de Sensores -->
+            <div class="flex items-center gap-2 text-[10px] font-mono bg-dashBg px-2 py-0.5 rounded border border-dashBorder">
+                <span class="flex items-center gap-1">
+                    <span id="gpsDot" class="w-2 h-2 rounded-full bg-red-500"></span>
+                    <span id="gpsText" class="text-gray-400">GPS</span>
+                </span>
+                <span class="text-gray-700">|</span>
+                <span class="flex items-center gap-1">
+                    <span id="motionDot" class="w-2 h-2 rounded-full bg-red-500"></span>
+                    <span id="motionText" class="text-gray-400">G-SENSOR</span>
+                </span>
+                <span class="text-gray-700">|</span>
+                <span id="satAccuracy" class="text-gray-400">Prec: --m</span>
+            </div>
+        </div>
+
+        <!-- SELETOR DE PISTAS & AÇÕES -->
+        <div class="flex items-center gap-1.5">
+            <!-- Seletor Dropdown de Pistas -->
+            <div class="flex items-center bg-dashBg rounded border border-dashBorder px-2 py-0.5 text-xs font-mono">
+                <i data-lucide="map-pin" class="w-3.5 h-3.5 text-dashYellow mr-1.5"></i>
+                <select id="selectTrack" onchange="changeTrack(this.value)" class="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer pr-1">
+                    <!-- Opções geradas via JS -->
+                </select>
+            </div>
+
+            <!-- Botão Abrir Criador de Pistas -->
+            <button onclick="openTrackBuilder()" class="px-2.5 py-1 bg-dashGreen/20 hover:bg-dashGreen text-dashGreen hover:text-black border border-dashGreen/40 rounded text-[11px] font-bold font-mono transition flex items-center gap-1">
+                <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> CRIAR PISTA
+            </button>
+
+            <!-- Modo GPS Real / Simulação -->
+            <div class="flex items-center bg-dashBg p-0.5 rounded border border-dashBorder">
+                <button id="btnModeLive" onclick="setMode('live')" class="px-2 py-0.5 text-[10px] font-bold rounded transition text-gray-400">
+                    GPS REAL
+                </button>
+                <button id="btnModeSim" onclick="setMode('sim')" class="px-2 py-0.5 text-[10px] font-bold rounded transition bg-dashAccent text-black">
+                    SIMULAÇÃO
+                </button>
+            </div>
+
+            <button onclick="toggleAudio()" class="p-1 bg-dashBg hover:bg-dashBorder text-dashAccent rounded border border-dashBorder" title="Ativar/Desativar Som">
+                <i data-lucide="volume-2" id="iconAudio" class="w-3.5 h-3.5"></i>
+            </button>
+            <button onclick="toggleFullscreen()" class="p-1 bg-dashBg hover:bg-dashBorder text-gray-300 rounded border border-dashBorder" title="Tela Cheia">
+                <i data-lucide="maximize" class="w-3.5 h-3.5"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- DASHBOARD PRINCIPAL DA PAISAGEM -->
+    <main class="flex-1 grid grid-cols-12 gap-2 p-2 min-h-0 overflow-hidden">
+
+        <!-- LADO ESQUERDO: HUD DO PILOTO (8 COLUNAS) -->
+        <section class="col-span-8 flex flex-col gap-2 min-h-0">
+
+            <!-- DISPLAY CENTRAL DE VELOCIDADE E CRONÔMETRO -->
+            <div class="bg-dashPanel border border-dashBorder rounded-2xl p-3 flex-1 flex flex-col justify-between relative overflow-hidden shadow-2xl">
+                
+                <!-- Barra de Progresso de Velocidade -->
+                <div class="w-full bg-dashBg rounded-full h-2.5 border border-dashBorder overflow-hidden mb-1">
+                    <div id="barSpeed" class="bg-gradient-to-r from-dashAccent via-dashYellow to-dashRed h-full transition-all duration-100" style="width: 0%"></div>
+                </div>
+
+                <!-- PAINEL SPLIT (VELOCÍMETRO + CRONÔMETRO) -->
+                <div class="grid grid-cols-2 gap-2 items-center flex-1 my-auto">
+                    
+                    <!-- VELOCÍMETRO GIGANTE -->
+                    <div class="flex flex-col items-center justify-center border-r border-dashBorder/80 pr-3">
+                        <span class="text-[11px] uppercase font-mono text-gray-400 tracking-widest font-bold">VELOCIDADE</span>
+                        <div class="flex items-baseline gap-1 my-1">
+                            <span id="valSpeed" class="text-7xl sm:text-8xl md:text-9xl font-black font-mono tracking-tighter text-white text-glow-lg">0</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm font-black text-dashAccent font-mono">KM/H</span>
+                            <span class="text-gray-600 font-mono">|</span>
+                            <span id="valTopSpeed" class="text-[11px] font-mono text-gray-400">MÁX: 0 km/h</span>
+                        </div>
+                    </div>
+
+                    <!-- CRONÔMETRO GIGANTE & DELTA -->
+                    <div class="flex flex-col items-center justify-center pl-2">
+                        <span class="text-[11px] uppercase font-mono text-gray-400 tracking-widest font-bold flex items-center gap-1">
+                            <i data-lucide="timer" class="w-3.5 h-3.5 text-dashYellow"></i> VOLTA <span id="valLapCount" class="text-white font-bold">0</span>
+                        </span>
+                        
+                        <div id="valCurrentLap" class="text-5xl sm:text-6xl md:text-7xl font-black font-mono text-dashYellow my-1 tracking-wider text-glow-lg">
+                            00:00.00
+                        </div>
+
+                        <!-- Delta em Tempo Real -->
+                        <div class="flex items-center gap-2 text-xs font-mono">
+                            <span class="text-gray-400 text-[10px]">DELTA:</span>
+                            <span id="valDelta" class="px-3 py-1 rounded-md bg-dashBg border border-dashBorder text-gray-300 font-black text-base tracking-wider">--:--.--</span>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- TIRA INFERIOR DE TEMPOS E PISTA -->
+                <div class="grid grid-cols-4 gap-2 pt-2 border-t border-dashBorder/80 shrink-0 text-center font-mono">
+                    <div class="bg-dashBg/90 p-1.5 rounded-xl border border-dashBorder">
+                        <span class="text-[8px] uppercase text-gray-400 block font-bold">MELHOR VOLTA</span>
+                        <span id="valBestLap" class="text-sm font-black text-dashGreen">--:--.--</span>
+                    </div>
+                    <div class="bg-dashBg/90 p-1.5 rounded-xl border border-dashBorder">
+                        <span class="text-[8px] uppercase text-gray-400 block font-bold">ÚLTIMA VOLTA</span>
+                        <span id="valLastLap" class="text-sm font-black text-white">--:--.--</span>
+                    </div>
+                    <div class="bg-dashBg/90 p-1.5 rounded-xl border border-dashBorder">
+                        <span class="text-[8px] uppercase text-gray-400 block font-bold">DIST. LINHA CHEGADA</span>
+                        <span id="valDistRef" class="text-sm font-black text-dashYellow">-- m</span>
+                    </div>
+                    <div class="bg-dashBg/90 p-1.5 rounded-xl border border-dashBorder">
+                        <span class="text-[8px] uppercase text-gray-400 block font-bold">PISTA ATIVA</span>
+                        <span id="valActiveTrackName" class="text-xs font-bold text-dashAccent truncate block">Interlagos</span>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- BOTÕES DE CONTROLE NO VOLANTE -->
+            <div class="grid grid-cols-3 gap-2 shrink-0">
+                <button onclick="setRefPointCurrent()" class="py-3 bg-dashRed hover:bg-red-600 text-white font-black text-xs uppercase tracking-wider rounded-xl transition shadow glow-red flex items-center justify-center gap-2 active:scale-95">
+                    <i data-lucide="flag" class="w-4 h-4"></i> DEFINIR CHEGADA AQUI
+                </button>
+                
+                <button onclick="calibrateSensors()" class="py-3 bg-dashYellow hover:bg-yellow-500 text-black font-black text-xs uppercase tracking-wider rounded-xl transition shadow flex items-center justify-center gap-2 active:scale-95">
+                    <i data-lucide="compass" class="w-4 h-4"></i> ZERAR ACELERÔMETRO
+                </button>
+
+                <button id="btnSimToggle" onclick="toggleSimPlay()" class="py-3 bg-dashAccent hover:bg-cyan-400 text-black font-black text-xs uppercase tracking-wider rounded-xl transition shadow glow-accent flex items-center justify-center gap-2 active:scale-95">
+                    <i data-lucide="pause" id="iconSimPlay" class="w-4 h-4"></i> SIM PAUSAR
+                </button>
+            </div>
+
+        </section>
+
+        <!-- LADO DIREITO: ABAS DE MINIMAPA / FORÇA G / VOLTAS (4 COLUNAS) -->
+        <section class="col-span-4 bg-dashPanel border border-dashBorder rounded-2xl p-2 flex flex-col justify-between min-h-0 shadow-2xl relative">
+            
+            <div class="flex items-center justify-between border-b border-dashBorder pb-1.5 shrink-0">
+                <div class="flex items-center gap-1 bg-dashBg p-0.5 rounded-lg border border-dashBorder text-xs font-mono w-full justify-between">
+                    <button id="tabBtnMap" onclick="switchRightTab('map')" class="px-2 py-1 rounded font-bold text-dashAccent bg-dashPanel border border-dashBorder text-[10px] flex-1 text-center">
+                        MINIMAPA
+                    </button>
+                    <button id="tabBtnGForce" onclick="switchRightTab('gforce')" class="px-2 py-1 rounded font-bold text-gray-400 hover:text-white text-[10px] flex-1 text-center">
+                        FORÇA-G
+                    </button>
+                    <button id="tabBtnLaps" onclick="switchRightTab('laps')" class="px-2 py-1 rounded font-bold text-gray-400 hover:text-white text-[10px] flex-1 text-center">
+                        VOLTAS
+                    </button>
+                </div>
+            </div>
+
+            <!-- ABA 1: MINIMAPA DA PISTA -->
+            <div id="tabContentMap" class="flex-1 w-full relative min-h-0 mt-1.5 rounded-xl border border-dashBorder overflow-hidden">
+                <div id="map" class="w-full h-full bg-dashBg"></div>
+            </div>
+
+            <!-- ABA 2: RADAR DE FORÇA G (FRICTION CIRCLE) -->
+            <div id="tabContentGForce" class="hidden flex-1 w-full flex flex-col items-center justify-center relative min-h-0 mt-1.5 bg-dashBg rounded-xl border border-dashBorder p-2">
+                <div class="relative w-36 h-36 flex items-center justify-center">
+                    <canvas id="canvasGForce" width="150" height="150" class="w-full h-full"></canvas>
+                </div>
+
+                <div class="w-full grid grid-cols-2 gap-1 mt-2 pt-2 border-t border-dashBorder text-xs font-mono text-center">
+                    <div>
+                        <span class="text-gray-500 text-[8px] block uppercase font-bold">LATERAL (CURVA)</span>
+                        <span id="valLatG" class="font-black text-dashAccent text-sm">0.00 G</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-500 text-[8px] block uppercase font-bold">LONGITUDINAL</span>
+                        <span id="valLongG" class="font-black text-dashYellow text-sm">0.00 G</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ABA 3: HISTÓRICO DE VOLTAS -->
+            <div id="tabContentLaps" class="hidden flex-1 w-full flex flex-col min-h-0 mt-1.5 bg-dashBg rounded-xl border border-dashBorder p-1.5 overflow-hidden">
+                <div class="flex justify-between items-center px-1.5 py-1 text-[10px] font-mono text-gray-400 border-b border-dashBorder">
+                    <span class="font-bold">VOLTAS GRAVADAS</span>
+                    <div class="flex gap-2">
+                        <button onclick="exportCSV()" class="text-dashAccent hover:underline">CSV</button>
+                        <button onclick="clearLaps()" class="text-red-400 hover:underline">Limpar</button>
+                    </div>
+                </div>
+                <div class="flex-1 overflow-y-auto">
+                    <table class="w-full text-left text-[10px] font-mono">
+                        <thead class="bg-dashPanel text-gray-400 sticky top-0 text-[8px] uppercase border-b border-dashBorder">
+                            <tr>
+                                <th class="p-1">Nº</th>
+                                <th class="p-1">Tempo</th>
+                                <th class="p-1">Mín km/h</th>
+                                <th class="p-1">Máx km/h</th>
+                                <th class="p-1">G Lat</th>
+                            </tr>
+                        </thead>
+                        <tbody id="lapTableBody" class="divide-y divide-dashBorder/30">
+                            <tr id="emptyTableMsg">
+                                <td colspan="5" class="p-3 text-center text-gray-500">Nenhuma volta registrada</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- MODAL: CRIADOR E GERENCIADOR DE PISTAS CUSTOMIZADAS -->
+    <div id="modalTrackBuilder" class="fixed inset-0 bg-dashBg/95 backdrop-blur-md z-[120] hidden flex flex-col p-3 overflow-hidden">
+        
+        <!-- Cabeçalho do Modal -->
+        <div class="flex items-center justify-between border-b border-dashBorder pb-2 mb-2 shrink-0">
+            <div class="flex items-center gap-2">
+                <i data-lucide="map" class="w-5 h-5 text-dashGreen"></i>
+                <h2 class="text-lg font-black uppercase text-white tracking-wider">Criador de Pistas & Circuitos</h2>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <button onclick="exportCustomTracksJSON()" class="px-2.5 py-1 bg-dashBg text-xs text-gray-300 rounded border border-dashBorder hover:bg-dashPanel font-mono">
+                    Exportar Pistas (JSON)
+                </button>
+                <label class="px-2.5 py-1 bg-dashBg text-xs text-gray-300 rounded border border-dashBorder hover:bg-dashPanel cursor-pointer font-mono">
+                    Importar (JSON)
+                    <input type="file" accept=".json" onchange="importCustomTracksJSON(event)" class="hidden">
+                </label>
+                <button onclick="closeTrackBuilder()" class="p-1 bg-dashRed/20 text-dashRed rounded hover:bg-dashRed hover:text-white transition">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Conteúdo Principal do Criador de Pistas -->
+        <div class="flex-1 grid grid-cols-12 gap-3 min-h-0 overflow-hidden">
+            
+            <!-- Painel de Modos e Configuração (4 Colunantes) -->
+            <div class="col-span-4 bg-dashPanel border border-dashBorder rounded-xl p-3 flex flex-col justify-between overflow-y-auto">
+                
+                <div>
+                    <label class="text-[10px] font-mono text-gray-400 uppercase font-bold block mb-1">Nome da Pista Customizada</label>
+                    <input type="text" id="inputTrackName" placeholder="Ex: Corrida de Rua - Circuito Centro" class="w-full bg-dashBg border border-dashBorder rounded px-3 py-1.5 text-xs text-white font-mono mb-3 focus:border-dashAccent focus:outline-none">
+
+                    <label class="text-[10px] font-mono text-gray-400 uppercase font-bold block mb-1">Tolerância da Linha de Chegada (Metros)</label>
+                    <div class="flex items-center gap-2 mb-4">
+                        <input type="range" id="inputTolerance" min="5" max="35" value="15" oninput="document.getElementById('lblTolerance').innerText = `${this.value}m`" class="w-full accent-dashAccent">
+                        <span id="lblTolerance" class="text-xs font-mono font-bold text-dashAccent w-8">15m</span>
+                    </div>
+
+                    <!-- Abas de Método de Criação -->
+                    <div class="grid grid-cols-2 gap-1 bg-dashBg p-1 rounded-lg border border-dashBorder mb-3">
+                        <button id="btnBuilderTabManual" onclick="switchBuilderMode('manual')" class="py-1.5 text-[10px] font-bold font-mono rounded bg-dashPanel text-dashAccent border border-dashBorder">
+                            1. DESENHAR NO MAPA
+                        </button>
+                        <button id="btnBuilderTabRec" onclick="switchBuilderMode('rec')" class="py-1.5 text-[10px] font-bold font-mono rounded text-gray-400">
+                            2. GRAVAR DIRIJA (AUTO-LEARN)
+                        </button>
+                    </div>
+
+                    <!-- Conteúdo Método 1: Manual -->
+                    <div id="builderModeManual" class="space-y-2 text-xs text-gray-300 font-mono">
+                        <p class="text-[11px] text-gray-400 leading-relaxed">
+                            <strong>Instruções:</strong><br>
+                            1. Clique no mapa para posicionar a <strong class="text-dashGreen">Linha de Chegada</strong> (ponto verde).<br>
+                            2. Continue clicando para adicionar os pontos da curva do circuito.<br>
+                            3. O sistema unirá os pontos para formar a pista.
+                        </p>
+                        <div class="flex gap-2 pt-2">
+                            <button onclick="clearManualDrawing()" class="px-3 py-1.5 bg-dashBg text-gray-400 border border-dashBorder rounded hover:text-white flex-1 text-[11px]">
+                                Limpar Pontos
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Conteúdo Método 2: Auto-Learn / Reconhecimento -->
+                    <div id="builderModeRec" class="hidden space-y-2 font-mono">
+                        <p class="text-[11px] text-gray-400 leading-relaxed">
+                            <strong>Modo Reconhecimento em Tempo Real:</strong><br>
+                            Vá até o local de largada com o veículo, inicie a gravação e dê uma volta completa.
+                        </p>
+                        <div class="pt-2">
+                            <button id="btnStartRec" onclick="toggleTrackRecording()" class="w-full py-2.5 bg-dashGreen text-black font-black text-xs uppercase rounded-lg shadow glow-green flex items-center justify-center gap-2">
+                                <i data-lucide="disc" class="w-4 h-4"></i> INICIAR GRAVAÇÃO DE VOLTA
+                            </button>
+                        </div>
+                        <p id="lblRecStatus" class="text-[10px] text-center text-dashYellow hidden animate-pulse">
+                            Gravando pontos via GPS... Mantenha o app aberto.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="pt-3 border-t border-dashBorder space-y-2">
+                    <button onclick="saveCustomTrack()" class="w-full py-2.5 bg-dashAccent text-black font-black text-xs uppercase rounded-xl shadow glow-accent">
+                        SALVAR E ATIVAR PISTA
+                    </button>
+                </div>
+
+            </div>
+
+            <!-- Mapa Interativo de Edição (8 Colunas) -->
+            <div class="col-span-8 bg-dashPanel border border-dashBorder rounded-xl relative overflow-hidden flex flex-col">
+                <div id="builderMap" class="w-full h-full bg-dashBg"></div>
+                <div class="absolute bottom-2 left-2 bg-dashPanel/90 backdrop-blur px-3 py-1.5 rounded-lg border border-dashBorder z-[1000] text-[10px] font-mono text-gray-300">
+                    Clique no mapa para criar pontos | Pontos criados: <strong id="lblPointCount" class="text-dashGreen">0</strong>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- RODAPÉ DE STATUS -->
+    <footer class="bg-dashPanel border-t border-dashBorder px-3 py-1 text-[10px] font-mono text-gray-500 flex justify-between items-center shrink-0">
+        <div class="flex items-center gap-3">
+            <span>ORIENTAÇÃO: <strong id="valHeading" class="text-gray-300">0°</strong></span>
+            <span>ALTITUDE: <strong id="valAltitude" class="text-gray-300">--m</strong></span>
+            <span>DESLOCAMENTO SUPORTE: <strong id="valCalibOffset" class="text-dashYellow">0.0°</strong></span>
+        </div>
+        <div class="flex items-center gap-2">
+            <span id="wakeLockStatus" class="text-dashGreen flex items-center gap-1 font-bold">
+                <span class="w-1.5 h-1.5 rounded-full bg-dashGreen animate-pulse"></span> TELA ATIVA (WAKE LOCK)
+            </span>
+        </div>
+    </footer>
+
+    <!-- LÓGICA EM JAVASCRIPT -->
+    <script>
+        // ==========================================
+        // BANCO DE DADOS DE PISTAS PADRÃO
+        // ==========================================
+        const defaultTracks = {
+            "interlagos": {
+                id: "interlagos",
+                name: "Autódromo de Interlagos",
+                tolerance: 15,
+                finishLine: { lat: -23.7011, lng: -46.6972 },
+                path: [
+                    { lat: -23.7011, lng: -46.6972, targetSpeed: 235 },
+                    { lat: -23.7032, lng: -46.6961, targetSpeed: 105 },
+                    { lat: -23.7042, lng: -46.6968, targetSpeed: 88 },
+                    { lat: -23.7040, lng: -46.6985, targetSpeed: 185 },
+                    { lat: -23.7028, lng: -46.7020, targetSpeed: 245 },
+                    { lat: -23.7025, lng: -46.7045, targetSpeed: 115 },
+                    { lat: -23.7008, lng: -46.7040, targetSpeed: 165 },
+                    { lat: -23.6995, lng: -46.7025, targetSpeed: 98 },
+                    { lat: -23.7005, lng: -46.6995, targetSpeed: 72 },
+                    { lat: -23.7025, lng: -46.6988, targetSpeed: 155 }
+                ]
+            },
+            "velocitta": {
+                id: "velocitta",
+                name: "Autódromo Velo Città",
+                tolerance: 12,
+                finishLine: { lat: -22.3150, lng: -47.0120 },
+                path: [
+                    { lat: -22.3150, lng: -47.0120, targetSpeed: 190 },
+                    { lat: -22.3165, lng: -47.0110, targetSpeed: 95 },
+                    { lat: -22.3180, lng: -47.0125, targetSpeed: 110 },
+                    { lat: -22.3170, lng: -47.0140, targetSpeed: 140 },
+                    { lat: -22.3155, lng: -47.0135, targetSpeed: 80 }
+                ]
+            }
+        };
+
+        // Estado Global
+        let activeTrack = defaultTracks["interlagos"];
+        let customTracks = {};
+        let appMode = 'sim';
+        let audioEnabled = true;
+        let wakeLock = null;
+
+        // Telemetria
+        let currentPos = { lat: 0, lng: 0, speed: 0, heading: 0, alt: 0, accuracy: 0 };
+        let gForce = { lateral: 0, longitudinal: 0, rawX: 0, rawY: 0 };
+        let sensorCalibration = { offsetX: 0, offsetY: 0, isCalibrated: false };
+
+        // Lap Timer State
+        let lapState = {
+            isRunning: false,
+            startTime: 0,
+            lapCount: 0,
+            bestLapTime: null,
+            lastLapTime: null,
+            topSpeedCurrentLap: 0,
+            minSpeedCurrentLap: null,
+            insideZone: false,
+            laps: []
+        };
+
+        // Elementos de Mapa
+        let map = null;
+        let carMarker = null;
+        let refCircleMarker = null;
+        let trackPolyline = null;
+        let pathHistory = [];
+        let audioCtx = null;
+
+        // Elementos do Criador de Pistas
+        let builderMap = null;
+        let builderMode = 'manual'; // 'manual' ou 'rec'
+        let isRecordingTrack = false;
+        let manualPoints = [];
+        let recordedPath = [];
+        let builderPolyline = null;
+        let builderMarkers = [];
+
+        // Simulação
+        let simIndex = 0;
+        let simProgress = 0;
+        let simInterval = null;
+        let simIsPlaying = true;
+
+        // ==========================================
+        // INICIALIZAÇÃO DA APLICAÇÃO
+        // ==========================================
+        window.addEventListener('load', () => {
+            if (window.lucide && typeof lucide.createIcons === 'function') lucide.createIcons();
+            loadCustomTracksFromStorage();
+            initMap();
+            initGForceCanvas();
+            updateTrackDropdown();
+            requestWakeLock();
+            checkOrientation();
+
+            window.addEventListener('resize', checkOrientation);
+            window.addEventListener('orientationchange', checkOrientation);
+
+            requestAnimationFrame(mainLoop);
+            setMode('sim');
+        });
+
+        function checkOrientation() {
+            const overlay = document.getElementById('portraitOverlay');
+            if (window.innerHeight > window.innerWidth) {
+                overlay.classList.remove('hidden');
+            } else {
+                overlay.classList.add('hidden');
+            }
+        }
+
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                }
+            } catch (err) {}
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(e => {});
+            } else {
+                if (document.exitFullscreen) document.exitFullscreen();
+            }
+        }
+
+        // ==========================================
+        // GERENCIAMENTO DE PISTAS & LOCAL STORAGE
+        // ==========================================
+        function loadCustomTracksFromStorage() {
+            const saved = localStorage.getItem('apex_custom_tracks');
+            if (saved) {
+                try { customTracks = JSON.parse(saved); } catch (e) {}
+            }
+        }
+
+        function saveCustomTracksToStorage() {
+            localStorage.setItem('apex_custom_tracks', JSON.stringify(customTracks));
+        }
+
+        function updateTrackDropdown() {
+            const select = document.getElementById('selectTrack');
+            select.innerHTML = '';
+
+            // Adiciona padrões
+            Object.values(defaultTracks).forEach(tr => {
+                const opt = document.createElement('option');
+                opt.value = tr.id;
+                opt.innerText = tr.name;
+                select.appendChild(opt);
+            });
+
+            // Adiciona customizadas
+            Object.values(customTracks).forEach(tr => {
+                const opt = document.createElement('option');
+                opt.value = tr.id;
+                opt.innerText = `★ ${tr.name}`;
+                select.appendChild(opt);
+            });
+
+            select.value = activeTrack.id;
+        }
+
+        function changeTrack(trackId) {
+            if (defaultTracks[trackId]) {
+                activeTrack = defaultTracks[trackId];
+            } else if (customTracks[trackId]) {
+                activeTrack = customTracks[trackId];
+            }
+
+            document.getElementById('valActiveTrackName').innerText = activeTrack.name;
+            setRefPoint(activeTrack.finishLine.lat, activeTrack.finishLine.lng, activeTrack.tolerance);
+
+            if (appMode === 'sim') startSimulation();
+        }
+
+        // ==========================================
+        // MAPA PRINCIPAL DO DASHBOARD
+        // ==========================================
+        function initMap() {
+            map = L.map('map', { zoomControl: false, attributionControl: false }).setView([activeTrack.finishLine.lat, activeTrack.finishLine.lng], 15);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+
+            const carIcon = L.divIcon({
+                className: 'custom-car-icon',
+                html: `<div class="w-3.5 h-3.5 bg-dashAccent rounded-full border-2 border-white shadow-lg glow-accent"></div>`,
+                iconSize: [14, 14],
+                iconAnchor: [7, 7]
+            });
+
+            carMarker = L.marker([activeTrack.finishLine.lat, activeTrack.finishLine.lng], { icon: carIcon }).addTo(map);
+            trackPolyline = L.polyline([], { color: '#0ea5e9', weight: 3, opacity: 0.8 }).addTo(map);
+
+            setRefPoint(activeTrack.finishLine.lat, activeTrack.finishLine.lng, activeTrack.tolerance);
+        }
+
+        function setRefPoint(lat, lng, radius = 15) {
+            if (refCircleMarker) map.removeLayer(refCircleMarker);
+
+            refCircleMarker = L.circle([lat, lng], {
+                color: '#ef4444',
+                fillColor: '#ef4444',
+                fillOpacity: 0.35,
+                radius: radius
+            }).addTo(map);
+        }
+
+        function setRefPointCurrent() {
+            if (currentPos.lat !== 0 && currentPos.lng !== 0) {
+                activeTrack.finishLine = { lat: currentPos.lat, lng: currentPos.lng };
+                setRefPoint(currentPos.lat, currentPos.lng, activeTrack.tolerance);
+                playChime(600, 0.1);
+            }
+        }
+
+        // ==========================================
+        // CRIADOR DE PISTAS (BUILDER MODAL)
+        // ==========================================
+        function openTrackBuilder() {
+            document.getElementById('modalTrackBuilder').classList.remove('hidden');
+
+            if (!builderMap) {
+                builderMap = L.map('builderMap', { zoomControl: true, attributionControl: false })
+                    .setView([currentPos.lat || activeTrack.finishLine.lat, currentPos.lng || activeTrack.finishLine.lng], 15);
+
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(builderMap);
+
+                builderMap.on('click', handleBuilderMapClick);
+                builderPolyline = L.polyline([], { color: '#10b981', weight: 4 }).addTo(builderMap);
+            } else {
+                builderMap.invalidateSize();
+            }
+        }
+
+        function closeTrackBuilder() {
+            document.getElementById('modalTrackBuilder').classList.add('hidden');
+        }
+
+        function switchBuilderMode(mode) {
+            builderMode = mode;
+            const btnManual = document.getElementById('btnBuilderTabManual');
+            const btnRec = document.getElementById('btnBuilderTabRec');
+            const secManual = document.getElementById('builderModeManual');
+            const secRec = document.getElementById('builderModeRec');
+
+            if (mode === 'manual') {
+                btnManual.className = "py-1.5 text-[10px] font-bold font-mono rounded bg-dashPanel text-dashAccent border border-dashBorder";
+                btnRec.className = "py-1.5 text-[10px] font-bold font-mono rounded text-gray-400";
+                secManual.classList.remove('hidden');
+                secRec.classList.add('hidden');
+            } else {
+                btnRec.className = "py-1.5 text-[10px] font-bold font-mono rounded bg-dashPanel text-dashAccent border border-dashBorder";
+                btnManual.className = "py-1.5 text-[10px] font-bold font-mono rounded text-gray-400";
+                secRec.classList.remove('hidden');
+                secManual.classList.add('hidden');
+            }
+        }
+
+        function handleBuilderMapClick(e) {
+            if (builderMode !== 'manual') return;
+
+            const { lat, lng } = e.latlng;
+            manualPoints.push({ lat, lng, targetSpeed: 120 });
+
+            // Desenha Marcador
+            const isFinish = manualPoints.length === 1;
+            const marker = L.circleMarker([lat, lng], {
+                radius: isFinish ? 8 : 5,
+                color: isFinish ? '#10b981' : '#0ea5e9',
+                fillColor: isFinish ? '#10b981' : '#0ea5e9',
+                fillOpacity: 0.8
+            }).addTo(builderMap);
+
+            builderMarkers.push(marker);
+            builderPolyline.setLatLngs(manualPoints.map(p => [p.lat, p.lng]));
+            document.getElementById('lblPointCount').innerText = manualPoints.length;
+        }
+
+        function clearManualDrawing() {
+            manualPoints = [];
+            builderMarkers.forEach(m => builderMap.removeLayer(m));
+            builderMarkers = [];
+            builderPolyline.setLatLngs([]);
+            document.getElementById('lblPointCount').innerText = 0;
+        }
+
+        function toggleTrackRecording() {
+            isRecordingTrack = !isRecordingTrack;
+            const btn = document.getElementById('btnStartRec');
+            const lbl = document.getElementById('lblRecStatus');
+
+            if (isRecordingTrack) {
+                recordedPath = [];
+                btn.className = "w-full py-2.5 bg-dashRed text-white font-black text-xs uppercase rounded-lg shadow glow-red flex items-center justify-center gap-2";
+                btn.innerHTML = `<i data-lucide="square" class="w-4 h-4"></i> CONCLUIR E DEFINIR PISTA`;
+                lbl.classList.remove('hidden');
+            } else {
+                btn.className = "w-full py-2.5 bg-dashGreen text-black font-black text-xs uppercase rounded-lg shadow glow-green flex items-center justify-center gap-2";
+                btn.innerHTML = `<i data-lucide="disc" class="w-4 h-4"></i> INICIAR GRAVAÇÃO DE VOLTA`;
+                lbl.classList.add('hidden');
+                lucide.createIcons();
+            }
+        }
+
+        function saveCustomTrack() {
+            const name = document.getElementById('inputTrackName').value.trim() || `Circuito ${Object.keys(customTracks).length + 1}`;
+            const tolerance = parseInt(document.getElementById('inputTolerance').value) || 15;
+
+            let finalPath = [];
+            if (builderMode === 'manual' && manualPoints.length >= 2) {
+                finalPath = [...manualPoints];
+            } else if (builderMode === 'rec' && recordedPath.length >= 2) {
+                finalPath = [...recordedPath];
+            } else {
+                alert("Por favor, adicione pelo menos 2 pontos ao circuito antes de salvar.");
+                return;
+            }
+
+            const trackId = `custom_${Date.now()}`;
+            const newTrack = {
+                id: trackId,
+                name: name,
+                tolerance: tolerance,
+                finishLine: { lat: finalPath[0].lat, lng: finalPath[0].lng },
+                path: finalPath
+            };
+
+            customTracks[trackId] = newTrack;
+            saveCustomTracksToStorage();
+            updateTrackDropdown();
+
+            activeTrack = newTrack;
+            changeTrack(trackId);
+
+            clearManualDrawing();
+            closeTrackBuilder();
+            alert(`Pista "${name}" salva e ativada com sucesso!`);
+        }
+
+        function exportCustomTracksJSON() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(customTracks, null, 2));
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `apex_pistas_${Date.now()}.json`);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        }
+
+        function importCustomTracksJSON(event) {
+            const fileReader = new FileReader();
+            fileReader.onload = function (e) {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    customTracks = { ...customTracks, ...imported };
+                    saveCustomTracksToStorage();
+                    updateTrackDropdown();
+                    alert("Pistas importadas com sucesso!");
+                } catch (err) {
+                    alert("Erro ao ler arquivo JSON de pistas.");
+                }
+            };
+            fileReader.readAsText(event.target.files[0]);
+        }
+
+        // ==========================================
+        // CALIBRAÇÃO E SENSORES GPS / ACELERÔMETRO
+        // ==========================================
+        function calibrateSensors() {
+            sensorCalibration.offsetX = gForce.rawX || 0;
+            sensorCalibration.offsetY = gForce.rawY || 0;
+            sensorCalibration.isCalibrated = true;
+
+            const offsetAngle = (Math.atan2(sensorCalibration.offsetY, sensorCalibration.offsetX) * 180 / Math.PI).toFixed(1);
+            document.getElementById('valCalibOffset').innerText = `${offsetAngle}° Zerado`;
+            playChime(1000, 0.15);
+        }
+
+        function setMode(mode) {
+            appMode = mode;
+            const btnLive = document.getElementById('btnModeLive');
+            const btnSim = document.getElementById('btnModeSim');
+
+            if (mode === 'live') {
+                btnLive.className = "px-2 py-0.5 text-[10px] font-bold rounded transition bg-dashAccent text-black";
+                btnSim.className = "px-2 py-0.5 text-[10px] font-bold rounded transition text-gray-400";
+                stopSimulation();
+                requestPermissions();
+            } else {
+                btnSim.className = "px-2 py-0.5 text-[10px] font-bold rounded transition bg-dashAccent text-black";
+                btnLive.className = "px-2 py-0.5 text-[10px] font-bold rounded transition text-gray-400";
+                startSimulation();
+            }
+        }
+
+        function requestPermissions() {
+            if ('geolocation' in navigator) {
+                navigator.geolocation.watchPosition(handleGpsPosition, null, { enableHighAccuracy: true });
+            }
+
+            if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission().then(state => {
+                    if (state === 'granted') window.addEventListener('devicemotion', handleMotionEvent);
+                });
+            } else if ('addEventListener' in window) {
+                window.addEventListener('devicemotion', handleMotionEvent);
+            }
+        }
+
+        function handleGpsPosition(pos) {
+            if (appMode !== 'live') return;
+
+            currentPos.lat = pos.coords.latitude;
+            currentPos.lng = pos.coords.longitude;
+            currentPos.speed = pos.coords.speed ? pos.coords.speed * 3.6 : 0;
+            currentPos.heading = pos.coords.heading || 0;
+            currentPos.alt = pos.coords.altitude || 0;
+            currentPos.accuracy = pos.coords.accuracy || 0;
+
+            document.getElementById('gpsDot').className = "w-2 h-2 rounded-full bg-dashGreen";
+            document.getElementById('satAccuracy').innerText = `Prec: ${currentPos.accuracy.toFixed(1)}m`;
+
+            if (isRecordingTrack) {
+                recordedPath.push({ lat: currentPos.lat, lng: currentPos.lng, targetSpeed: currentPos.speed });
+            }
+
+            updateTelemetryEngine();
+        }
+
+        function handleMotionEvent(e) {
+            if (appMode !== 'live') return;
+
+            const acc = e.accelerationIncludingGravity || e.acceleration;
+            if (acc) {
+                gForce.rawX = (acc.x || 0) / 9.81;
+                gForce.rawY = (acc.y || 0) / 9.81;
+
+                const adjustedX = gForce.rawX - sensorCalibration.offsetX;
+                const adjustedY = gForce.rawY - sensorCalibration.offsetY;
+
+                gForce.lateral = gForce.lateral * 0.7 + adjustedX * 0.3;
+                gForce.longitudinal = gForce.longitudinal * 0.7 + adjustedY * 0.3;
+
+                document.getElementById('motionDot').className = "w-2 h-2 rounded-full bg-dashGreen";
+            }
+        }
+
+        // ==========================================
+        // MOTOR DE SIMULAÇÃO
+        // ==========================================
+        function startSimulation() {
+            if (simInterval) clearInterval(simInterval);
+            simIndex = 0;
+            simProgress = 0;
+            simIsPlaying = true;
+
+            document.getElementById('gpsDot').className = "w-2 h-2 rounded-full bg-dashGreen";
+            document.getElementById('motionDot').className = "w-2 h-2 rounded-full bg-dashGreen";
+
+            simInterval = setInterval(() => {
+                if (!simIsPlaying) return;
+
+                const trackPath = activeTrack.path;
+                const p1 = trackPath[simIndex];
+                const p2 = trackPath[(simIndex + 1) % trackPath.length];
+
+                simProgress += 0.05;
+                if (simProgress >= 1) {
+                    simProgress = 0;
+                    simIndex = (simIndex + 1) % trackPath.length;
+                }
+
+                const speed = (p1.targetSpeed || 120) + ((p2.targetSpeed || 120) - (p1.targetSpeed || 120)) * simProgress + (Math.random() - 0.5) * 3;
+                const heading = Math.atan2(p2.lng - p1.lng, p2.lat - p1.lat) * (180 / Math.PI);
+
+                currentPos = {
+                    lat: p1.lat + (p2.lat - p1.lat) * simProgress,
+                    lng: p1.lng + (p2.lng - p1.lng) * simProgress,
+                    speed: speed,
+                    heading: heading < 0 ? heading + 360 : heading,
+                    alt: 760,
+                    accuracy: 2.0
+                };
+
+                gForce.lateral = Math.sin(simIndex + simProgress * 4) * (speed / 140);
+                gForce.longitudinal = (((p2.targetSpeed || 120) - (p1.targetSpeed || 120)) / 100);
+
+                updateTelemetryEngine();
+
+            }, 50);
+        }
+
+        function stopSimulation() {
+            if (simInterval) clearInterval(simInterval);
+        }
+
+        let simPausedAt = 0;
+
+        function toggleSimPlay() {
+            const now = Date.now();
+            simIsPlaying = !simIsPlaying;
+
+            if (!simIsPlaying) {
+                // Pausa a simulação e congela o tempo da volta atual.
+                simPausedAt = now;
+            } else {
+                // Ao retomar, desloca o início da volta pelo tempo em que ficou pausada.
+                if (simPausedAt && lapState.isRunning) {
+                    const pausedDuration = now - simPausedAt;
+                    lapState.startTime += pausedDuration;
+                    if (lastLapTriggerAt) lastLapTriggerAt += pausedDuration;
+                }
+                simPausedAt = 0;
+            }
+
+            const btn = document.getElementById('btnSimToggle');
+            if (btn) {
+                btn.innerText = simIsPlaying ? "SIM PAUSAR" : "SIM INICIAR";
+                const icon = document.getElementById('iconSimPlay');
+                if (icon) icon.setAttribute('data-lucide', simIsPlaying ? 'pause' : 'play');
+                if (window.lucide && typeof window.lucide.createIcons === 'function') window.lucide.createIcons();
+            }
+        }
+
+        // ==========================================
+        // MOTOR DE TEMPO DE VOLTA E CRONÔMETRO
+        // ==========================================
+        function updateTelemetryEngine() {
+            if (carMarker && currentPos.lat !== 0) {
+                carMarker.setLatLng([currentPos.lat, currentPos.lng]);
+
+                pathHistory.push([currentPos.lat, currentPos.lng]);
+                if (pathHistory.length > 250) pathHistory.shift();
+                trackPolyline.setLatLngs(pathHistory);
+
+                map.panTo([currentPos.lat, currentPos.lng], { animate: true, duration: 0.1 });
+            }
+
+            const finish = activeTrack.finishLine;
+            if (finish) {
+                const dist = calculateHaversineDistance(currentPos.lat, currentPos.lng, finish.lat, finish.lng);
+                document.getElementById('valDistRef').innerText = `${Math.round(dist)} m`;
+
+                if (dist <= activeTrack.tolerance) {
+                    if (!lapState.insideZone) {
+                        lapState.insideZone = true;
+                        triggerLapCross();
+                    }
+                } else {
+                    lapState.insideZone = false;
+                }
+            }
+
+            if (lapState.isRunning) {
+                if (currentPos.speed > lapState.topSpeedCurrentLap) lapState.topSpeedCurrentLap = currentPos.speed;
+            }
+        }
+
+        function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371000;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+        }
+
+        function triggerLapCross() {
+            const now = Date.now();
+
+            if (!lapState.isRunning) {
+                lapState.isRunning = true;
+                lapState.startTime = now;
+                lapState.lapCount = 1;
+                playChime(800, 0.2);
+            } else {
+                const lapTimeMs = now - lapState.startTime;
+                if (lapTimeMs < 6000) return;
+
+                lapState.lastLapTime = lapTimeMs;
+                let isBest = false;
+
+                if (!lapState.bestLapTime || lapTimeMs < lapState.bestLapTime) {
+                    lapState.bestLapTime = lapTimeMs;
+                    isBest = true;
+                }
+
+                const record = {
+                    lapNumber: lapState.lapCount,
+                    formattedTime: formatTime(lapTimeMs),
+                    topSpeed: lapState.topSpeedCurrentLap,
+                    peakLatG: Math.abs(gForce.lateral),
+                    isBest: isBest
+                };
+
+                lapState.laps.push(record);
+                addLapToTable(record);
+
+                playChime(isBest ? 1200 : 880, 0.3);
+
+                lapState.lapCount++;
+                lapState.startTime = now;
+                lapState.topSpeedCurrentLap = currentPos.speed;
+            }
+        }
+
+        // ==========================================
+        // RENDERIZAÇÃO EM TEMPO REAL (60 FPS)
+        // ==========================================
+        function mainLoop() {
+            document.getElementById('valSpeed').innerText = Math.round(currentPos.speed);
+            document.getElementById('barSpeed').style.width = `${Math.min(100, (currentPos.speed / 280) * 100)}%`;
+
+            if (lapState.isRunning) {
+                // Enquanto a simulação está pausada, mantém o cronômetro congelado.
+                const timerNow = (!simIsPlaying && simPausedAt) ? simPausedAt : Date.now();
+                const elapsed = Math.max(0, timerNow - lapState.startTime);
+                document.getElementById('valCurrentLap').innerText = formatTime(elapsed);
+
+                if (lapState.bestLapTime) {
+                    const deltaMs = elapsed - lapState.bestLapTime;
+                    const deltaElem = document.getElementById('valDelta');
+                    deltaElem.innerText = `${deltaMs > 0 ? '+' : ''}${(deltaMs / 1000).toFixed(2)}s`;
+                    deltaElem.className = deltaMs > 0 
+                        ? "px-3 py-1 rounded-md bg-dashRed/20 text-dashRed font-black border border-dashRed/50 tracking-wider text-base" 
+                        : "px-3 py-1 rounded-md bg-dashGreen/20 text-dashGreen font-black border border-dashGreen/50 tracking-wider text-base";
+                }
+            }
+
+            document.getElementById('valLapCount').innerText = lapState.lapCount;
+            document.getElementById('valBestLap').innerText = lapState.bestLapTime ? formatTime(lapState.bestLapTime) : '--:--.--';
+            document.getElementById('valLastLap').innerText = lapState.lastLapTime ? formatTime(lapState.lastLapTime) : '--:--.--';
+            document.getElementById('valHeading').innerText = `${Math.round(currentPos.heading)}°`;
+            document.getElementById('valAltitude').innerText = `${Math.round(currentPos.alt)}m`;
+
+            drawGForceCanvas();
+
+            requestAnimationFrame(mainLoop);
+        }
+
+        function formatTime(ms) {
+            const m = Math.floor(ms / 60000);
+            const s = Math.floor((ms % 60000) / 1000);
+            const ms10 = Math.floor((ms % 1000) / 10);
+            return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms10.toString().padStart(2, '0')}`;
+        }
+
+        // ==========================================
+        // CANVAS RADAR FORÇA G (FRICTION CIRCLE)
+        // ==========================================
+        let gCanvas, gCtx;
+
+        function initGForceCanvas() {
+            gCanvas = document.getElementById('canvasGForce');
+            if (!gCanvas) return;
+            gCtx = gCanvas.getContext ? gCanvas.getContext('2d') : null;
+            drawGForceCanvas();
+        }
+
+        function drawGForceCanvas() {
+            if (!gCanvas) gCanvas = document.getElementById('canvasGForce');
+            if (!gCanvas) return;
+            if (!gCtx && gCanvas.getContext) gCtx = gCanvas.getContext('2d');
+            if (!gCtx) return;
+
+            // Mantém o desenho nítido e visível mesmo após alternar as abas/orientação.
+            const box = gCanvas.getBoundingClientRect();
+            const cssSize = Math.max(150, Math.floor(Math.min(box.width || 150, box.height || 150)));
+            if (gCanvas.width !== cssSize || gCanvas.height !== cssSize) {
+                gCanvas.width = cssSize;
+                gCanvas.height = cssSize;
+            }
+            const w = gCanvas.width, h = gCanvas.height;
+            const cx = w / 2, cy = h / 2;
+            const scale = (Math.min(w, h) / 2 - 12) / 1.5;
+            gCtx.clearRect(0, 0, w, h);
+            gCtx.lineWidth = 1;
+            gCtx.strokeStyle = '#334155';
+            [0.5, 1.0, 1.5].forEach(level => {
+                gCtx.beginPath();
+                gCtx.arc(cx, cy, level * scale, 0, Math.PI * 2);
+                gCtx.stroke();
+            });
+            gCtx.beginPath();
+            gCtx.moveTo(cx, 8); gCtx.lineTo(cx, h - 8);
+            gCtx.moveTo(8, cy); gCtx.lineTo(w - 8, cy);
+            gCtx.strokeStyle = '#64748b';
+            gCtx.stroke();
+            // Limita a posição do ponto aos limites do radar.
+            const lat = Number.isFinite(gForce.lateral) ? gForce.lateral : 0;
+            const lon = Number.isFinite(gForce.longitudinal) ? gForce.longitudinal : 0;
+            const ballX = Math.max(8, Math.min(w - 8, cx + lat * scale));
+            const ballY = Math.max(8, Math.min(h - 8, cy - lon * scale));
+            gCtx.beginPath();
+            gCtx.moveTo(cx, cy); gCtx.lineTo(ballX, ballY);
+            gCtx.strokeStyle = '#0ea5e9'; gCtx.lineWidth = 2; gCtx.stroke();
+            gCtx.beginPath(); gCtx.arc(ballX, ballY, Math.max(5, cssSize * 0.035), 0, Math.PI * 2);
+            gCtx.fillStyle = '#0ea5e9'; gCtx.fill();
+            const latEl = document.getElementById('valLatG');
+            const longEl = document.getElementById('valLongG');
+            if (latEl) latEl.innerText = `${lat.toFixed(2)} G`;
+            if (longEl) longEl.innerText = `${lon.toFixed(2)} G`;
+        }
+
+        // ==========================================
+        // CONTROLE DE ABAS E DADOS DA TABELA
+        // ==========================================
+        function switchRightTab(tab) {
+            ['Map', 'GForce', 'Laps'].forEach(t => {
+                document.getElementById(`tabContent${t}`).classList.add('hidden');
+                document.getElementById(`tabBtn${t}`).className = "px-2 py-1 rounded font-bold text-gray-400 hover:text-white text-[10px] flex-1 text-center";
+            });
+
+            const activeBtn = document.getElementById(`tabBtn${tab.charAt(0).toUpperCase() + tab.slice(1)}`);
+            const activeTab = document.getElementById(`tabContent${tab.charAt(0).toUpperCase() + tab.slice(1)}`);
+            
+            activeTab.classList.remove('hidden');
+            activeBtn.className = "px-2 py-1 rounded font-bold text-dashAccent bg-dashPanel border border-dashBorder text-[10px] flex-1 text-center";
+
+            if (tab === 'map' && map) map.invalidateSize();
+            if (tab === 'gforce') {
+                initGForceCanvas();
+                requestAnimationFrame(() => drawGForceCanvas());
+            }
+        }
+
+        function addLapToTable(lap) {
+            const tbody = document.getElementById('lapTableBody');
+            const emptyMsg = document.getElementById('emptyTableMsg');
+            if (emptyMsg) emptyMsg.remove();
+            const tr = document.createElement('tr');
+            tr.className = lap.isBest ? "bg-dashGreen/10 font-bold" : "";
+            tr.innerHTML = `
+                <td class="p-1 text-gray-300">${lap.lapNumber}</td>
+                <td class="p-1 ${lap.isBest ? 'text-dashGreen font-bold' : 'text-white'}">${lap.formattedTime}</td>
+                <td class="p-1 text-gray-400">${Math.round(Number(lap.minSpeed) || 0)}</td>
+                <td class="p-1 text-gray-400">${Math.round(Number(lap.topSpeed) || 0)}</td>
+                <td class="p-1 text-gray-400">${(Number(lap.peakLatG) || 0).toFixed(2)}G</td>
+            `;
+            tbody.prepend(tr);
+        }
+
+        function clearLaps() {
+            lapState.laps = [];
+            lapState.lapCount = 0;
+            lapState.bestLapTime = null;
+            lapState.lastLapTime = null;
+            lapState.isRunning = false;
+            document.getElementById('lapTableBody').innerHTML = `<tr id="emptyTableMsg"><td colspan="5" class="p-3 text-center text-gray-500">Nenhuma volta registrada</td></tr>`;
+        }
+
+        function exportCSV() {
+            if (!lapState.laps.length) return;
+            let csv = "Volta,Tempo,VelocidadeMax,GLateralMax\n";
+            lapState.laps.forEach(l => {
+                csv += `${l.lapNumber},${l.formattedTime},${Math.round(l.topSpeed)},${l.peakLatG.toFixed(2)}\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `telemetria_pista_${activeTrack.id}_${Date.now()}.csv`;
+            a.click();
+        }
+
+        function toggleAudio() {
+            audioEnabled = !audioEnabled;
+            document.getElementById('iconAudio').className = audioEnabled ? "w-3.5 h-3.5 text-dashAccent" : "w-3.5 h-3.5 text-gray-600";
+        }
+
+        function playChime(freq = 800, duration = 0.2) {
+            if (!audioEnabled) return;
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch (e) {}
+        }
+
+
+        // ==========================================
+        // CAMADA DE CORREÇÕES E ROBUSTEZ
+        // ==========================================
+        // Geolocalização em navegador exige HTTPS ou localhost.
+        let gpsWatchId = null;
+        let gpsLastTimestamp = 0;
+        let lastAcceptedPosition = null;
+        let motionListenerAttached = false;
+        let lapArmed = false;
+        let lastLapTriggerAt = 0;
+        let activeTrackRoute = null;
+
+        function safeSetText(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        }
+
+        function setGpsStatus(ok, message) {
+            const dot = document.getElementById('gpsDot');
+            if (dot) dot.className = `w-2 h-2 rounded-full ${ok ? 'bg-dashGreen' : 'bg-red-500'}`;
+            safeSetText('gpsText', message || (ok ? 'GPS OK' : 'GPS'));
+        }
+
+        function loadCustomTracksFromStorage() {
+            try {
+                const saved = localStorage.getItem('apex_custom_tracks');
+                if (!saved) { customTracks = {}; return; }
+                const parsed = JSON.parse(saved);
+                customTracks = {};
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                    for (const [key, track] of Object.entries(parsed)) {
+                        if (isValidTrack(track)) customTracks[key] = normalizeTrack(track, key);
+                    }
+                }
+            } catch (err) {
+                customTracks = {};
+                console.warn('Não foi possível carregar as pistas salvas:', err);
+            }
+        }
+
+        function saveCustomTracksToStorage() {
+            try {
+                localStorage.setItem('apex_custom_tracks', JSON.stringify(customTracks));
+                return true;
+            } catch (err) {
+                alert('Não foi possível salvar as pistas neste navegador. Verifique o armazenamento disponível.');
+                console.error(err);
+                return false;
+            }
+        }
+
+        function isValidCoordinate(point) {
+            return !!point && Number.isFinite(Number(point.lat)) && Number.isFinite(Number(point.lng)) &&
+                Number(point.lat) >= -90 && Number(point.lat) <= 90 &&
+                Number(point.lng) >= -180 && Number(point.lng) <= 180;
+        }
+
+        function isValidTrack(track) {
+            return !!track && typeof track === 'object' && typeof track.name === 'string' &&
+                isValidCoordinate(track.finishLine) && Array.isArray(track.path) &&
+                track.path.length >= 2 && track.path.every(isValidCoordinate);
+        }
+
+        function normalizeTrack(track, key) {
+            const path = track.path.map(p => ({
+                lat: Number(p.lat), lng: Number(p.lng),
+                targetSpeed: Number.isFinite(Number(p.targetSpeed)) ? Number(p.targetSpeed) : 120
+            }));
+            const finishLine = isValidCoordinate(track.finishLine)
+                ? { lat: Number(track.finishLine.lat), lng: Number(track.finishLine.lng) }
+                : { lat: path[0].lat, lng: path[0].lng };
+            return {
+                id: String(track.id || key),
+                name: String(track.name || 'Pista sem nome').slice(0, 100),
+                tolerance: Math.max(5, Math.min(35, Number(track.tolerance) || 15)),
+                finishLine,
+                path
+            };
+        }
+
+        function updateTrackDropdown() {
+            const select = document.getElementById('selectTrack');
+            if (!select) return;
+            select.replaceChildren();
+            [...Object.values(defaultTracks), ...Object.values(customTracks)].forEach(tr => {
+                const opt = document.createElement('option');
+                opt.value = tr.id;
+                opt.textContent = customTracks[tr.id] ? `★ ${tr.name}` : tr.name;
+                select.appendChild(opt);
+            });
+            select.value = activeTrack.id;
+            if (select.value !== activeTrack.id) select.value = 'interlagos';
+        }
+
+        function changeTrack(trackId) {
+            const selected = defaultTracks[trackId] || customTracks[trackId];
+            if (!selected) return;
+            activeTrack = normalizeTrack(selected, trackId);
+            lapState.isRunning = false;
+            lapState.startTime = 0;
+            lapState.lapCount = 0;
+            lapState.bestLapTime = null;
+            lapState.lastLapTime = null;
+            lapState.topSpeedCurrentLap = 0;
+            lapState.insideZone = false;
+            lapState.laps = [];
+            lapArmed = false;
+            lastLapTriggerAt = 0;
+            pathHistory = [];
+            if (trackPolyline) trackPolyline.setLatLngs([]);
+            if (activeTrackRoute && map) map.removeLayer(activeTrackRoute);
+            if (map && activeTrack.path.length) {
+                activeTrackRoute = L.polyline(activeTrack.path.map(p => [p.lat, p.lng]), {
+                    color: '#0ea5e9', weight: 3, opacity: 0.8, dashArray: '6 5'
+                }).addTo(map);
+                map.setView([activeTrack.finishLine.lat, activeTrack.finishLine.lng], 15);
+            }
+            safeSetText('valActiveTrackName', activeTrack.name);
+            setRefPoint(activeTrack.finishLine.lat, activeTrack.finishLine.lng, activeTrack.tolerance);
+            clearLapsDisplayOnly();
+            if (appMode === 'sim') startSimulation();
+        }
+
+        function clearLapsDisplayOnly() {
+            const body = document.getElementById('lapTableBody');
+            if (body) body.innerHTML = '<tr id="emptyTableMsg"><td colspan="5" class="p-3 text-center text-gray-500">Nenhuma volta registrada</td></tr>';
+            safeSetText('valLapCount', '0');
+            safeSetText('valBestLap', '--:--.--');
+            safeSetText('valLastLap', '--:--.--');
+            safeSetText('valCurrentLap', '00:00.00');
+            safeSetText('valDelta', '--:--.--');
+        }
+
+        function setMode(mode) {
+            appMode = mode === 'live' ? 'live' : 'sim';
+            const btnLive = document.getElementById('btnModeLive');
+            const btnSim = document.getElementById('btnModeSim');
+            if (btnLive) btnLive.className = appMode === 'live'
+                ? 'px-2 py-0.5 text-[10px] font-bold rounded transition bg-dashAccent text-black'
+                : 'px-2 py-0.5 text-[10px] font-bold rounded transition text-gray-400';
+            if (btnSim) btnSim.className = appMode === 'sim'
+                ? 'px-2 py-0.5 text-[10px] font-bold rounded transition bg-dashAccent text-black'
+                : 'px-2 py-0.5 text-[10px] font-bold rounded transition text-gray-400';
+            if (appMode === 'live') {
+                stopSimulation();
+                gpsLastTimestamp = 0;
+                lastAcceptedPosition = null;
+                requestPermissions();
+            } else {
+                if (gpsWatchId !== null && navigator.geolocation) {
+                    navigator.geolocation.clearWatch(gpsWatchId);
+                    gpsWatchId = null;
+                }
+                setGpsStatus(true, 'SIMULAÇÃO');
+                startSimulation();
+            }
+        }
+
+        async function requestPermissions() {
+            // Solicita primeiro o acelerômetro, pois alguns celulares exigem que isso
+            // aconteça diretamente após o toque do usuário no botão "AO VIVO".
+            if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) {
+                try {
+                    const permission = await DeviceMotionEvent.requestPermission();
+                    if (permission === 'granted' && !motionListenerAttached) {
+                        window.addEventListener('devicemotion', handleMotionEvent, { passive: true });
+                        motionListenerAttached = true;
+                        safeSetText('motionText', 'SENSOR OK');
+                    } else if (permission !== 'granted') {
+                        safeSetText('motionText', 'PERMISSÃO NEGADA');
+                    }
+                } catch (err) {
+                    safeSetText('motionText', 'LIBERE O SENSOR');
+                }
+            } else if (!motionListenerAttached && typeof window !== 'undefined') {
+                window.addEventListener('devicemotion', handleMotionEvent, { passive: true });
+                motionListenerAttached = true;
+                safeSetText('motionText', 'AGUARDANDO SENSOR');
+            }
+
+            // GPS e sensores de movimento precisam de contexto seguro em navegadores atuais.
+            if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                setGpsStatus(false, 'HTTPS necessário');
+                safeSetText('motionText', 'ABRA POR HTTPS');
+                alert('Para usar GPS e força G no celular, abra o aplicativo por um endereço HTTPS. Abrir o arquivo diretamente ou por HTTP comum pode bloquear os sensores.');
+                return;
+            }
+            if (!('geolocation' in navigator)) {
+                setGpsStatus(false, 'GPS indisponível');
+                alert('Este navegador não oferece geolocalização. Tente um navegador atualizado no celular.');
+                return;
+            }
+            if (gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
+            setGpsStatus(false, 'Buscando GPS...');
+            gpsWatchId = navigator.geolocation.watchPosition(handleGpsPosition, handleGpsError, {
+                enableHighAccuracy: true, maximumAge: 500, timeout: 15000
+            });
+        }
+
+        function handleGpsError(err) {
+            const messages = {
+                1: 'Permissão negada',
+                2: 'Sinal indisponível',
+                3: 'GPS expirou'
+            };
+            setGpsStatus(false, messages[err && err.code] || 'Erro GPS');
+            console.warn('Erro de geolocalização:', err);
+        }
+
+        function handleGpsPosition(pos) {
+            if (appMode !== 'live' || !pos || !pos.coords) return;
+            const c = pos.coords;
+            const accuracy = Number(c.accuracy);
+            if (!Number.isFinite(c.latitude) || !Number.isFinite(c.longitude) ||
+                !Number.isFinite(accuracy) || accuracy > 60) {
+                setGpsStatus(false, 'GPS impreciso');
+                safeSetText('satAccuracy', `Prec: ${Number.isFinite(accuracy) ? accuracy.toFixed(1) : '--'}m`);
+                return;
+            }
+            const timestamp = Number(pos.timestamp) || Date.now();
+            if (timestamp <= gpsLastTimestamp) return;
+            let speed = Number.isFinite(c.speed) && c.speed >= 0 ? c.speed * 3.6 : null;
+            if (speed === null && lastAcceptedPosition) {
+                const dt = (timestamp - lastAcceptedPosition.timestamp) / 1000;
+                if (dt > 0.2 && dt < 10) {
+                    speed = calculateHaversineDistance(lastAcceptedPosition.lat, lastAcceptedPosition.lng, c.latitude, c.longitude) / dt * 3.6;
+                }
+            }
+            if (speed === null) speed = 0;
+            // Descarta saltos extremos causados por ruído do GPS.
+            if (lastAcceptedPosition) {
+                const dt = (timestamp - lastAcceptedPosition.timestamp) / 1000;
+                const moved = calculateHaversineDistance(lastAcceptedPosition.lat, lastAcceptedPosition.lng, c.latitude, c.longitude);
+                if (dt > 0 && dt < 5 && moved / dt > 120) {
+                    console.warn('Posição GPS descartada por salto improvável.');
+                    return;
+                }
+            }
+            gpsLastTimestamp = timestamp;
+            lastAcceptedPosition = { lat: c.latitude, lng: c.longitude, timestamp };
+            currentPos = {
+                lat: c.latitude, lng: c.longitude, speed,
+                heading: Number.isFinite(c.heading) ? c.heading : currentPos.heading,
+                alt: Number.isFinite(c.altitude) ? c.altitude : 0,
+                accuracy
+            };
+            setGpsStatus(true, 'GPS OK');
+            safeSetText('satAccuracy', `Prec: ${accuracy.toFixed(1)}m`);
+            if (isRecordingTrack) {
+                const last = recordedPath[recordedPath.length - 1];
+                const distance = last ? calculateHaversineDistance(last.lat, last.lng, currentPos.lat, currentPos.lng) : Infinity;
+                if ((!last || distance >= 3) && recordedPath.length < 25000) {
+                    recordedPath.push({ lat: currentPos.lat, lng: currentPos.lng, targetSpeed: currentPos.speed });
+                    if (builderPolyline && builderMap) builderPolyline.setLatLngs(recordedPath.map(p => [p.lat, p.lng]));
+                    safeSetText('lblPointCount', String(recordedPath.length));
+                }
+            }
+            updateTelemetryEngine();
+        }
+
+        let gravityEstimateX = 0, gravityEstimateY = 0, gravityEstimateZ = 0;
+        function handleMotionEvent(e) {
+            if (appMode !== 'live') return;
+            // Usa aceleração sem gravidade quando o aparelho fornece esse dado.
+            // Em aparelhos que só fornecem accelerationIncludingGravity, estima e
+            // remove a componente estática da gravidade para evitar ler 1 G parado.
+            let acc = e.acceleration;
+            let x, y, z;
+            if (acc && Number.isFinite(acc.x) && Number.isFinite(acc.y)) {
+                x = acc.x; y = acc.y; z = Number(acc.z) || 0;
+            } else {
+                const ag = e.accelerationIncludingGravity;
+                if (!ag || !Number.isFinite(ag.x) || !Number.isFinite(ag.y)) return;
+                const gx = Number(ag.x) || 0, gy = Number(ag.y) || 0, gz = Number(ag.z) || 0;
+                gravityEstimateX = gravityEstimateX * 0.90 + gx * 0.10;
+                gravityEstimateY = gravityEstimateY * 0.90 + gy * 0.10;
+                gravityEstimateZ = gravityEstimateZ * 0.90 + gz * 0.10;
+                x = gx - gravityEstimateX; y = gy - gravityEstimateY; z = gz - gravityEstimateZ;
+            }
+            gForce.rawX = x / 9.80665;
+            gForce.rawY = y / 9.80665;
+            const adjustedX = gForce.rawX - (sensorCalibration.isCalibrated ? sensorCalibration.offsetX : 0);
+            const adjustedY = gForce.rawY - (sensorCalibration.isCalibrated ? sensorCalibration.offsetY : 0);
+            gForce.lateral = gForce.lateral * 0.65 + adjustedX * 0.35;
+            gForce.longitudinal = gForce.longitudinal * 0.65 + adjustedY * 0.35;
+            const dot = document.getElementById('motionDot');
+            if (dot) dot.className = 'w-2 h-2 rounded-full bg-dashGreen';
+            safeSetText('motionText', 'SENSOR OK');
+        }
+
+        function updateTelemetryEngine() {
+            if (!Number.isFinite(currentPos.lat) || !Number.isFinite(currentPos.lng) || gpsLastTimestamp === 0 && appMode === 'live') return;
+            if (carMarker) carMarker.setLatLng([currentPos.lat, currentPos.lng]);
+            if (map && appMode === 'live') map.panTo([currentPos.lat, currentPos.lng], { animate: false });
+            pathHistory.push([currentPos.lat, currentPos.lng]);
+            if (pathHistory.length > 1000) pathHistory.shift();
+            if (trackPolyline) trackPolyline.setLatLngs(pathHistory);
+            const finish = activeTrack.finishLine;
+            if (finish) {
+                const dist = calculateHaversineDistance(currentPos.lat, currentPos.lng, finish.lat, finish.lng);
+                safeSetText('valDistRef', `${Math.round(dist)} m`);
+                const tolerance = Number(activeTrack.tolerance) || 15;
+                if (dist > tolerance + 8) lapArmed = true;
+                if (dist <= tolerance && !lapState.insideZone) {
+                    lapState.insideZone = true;
+                    if (lapArmed) {
+                        lapArmed = false;
+                        triggerLapCross();
+                    }
+                } else if (dist > tolerance + 3) {
+                    lapState.insideZone = false;
+                }
+            }
+            if (lapState.isRunning && Number.isFinite(currentPos.speed)) {
+                const speed = Math.max(0, currentPos.speed);
+                if (speed > lapState.topSpeedCurrentLap) lapState.topSpeedCurrentLap = speed;
+                if (lapState.minSpeedCurrentLap === null || speed < lapState.minSpeedCurrentLap) lapState.minSpeedCurrentLap = speed;
+            }
+        }
+
+        function triggerLapCross() {
+            const now = Date.now();
+            if (now - lastLapTriggerAt < 5000) return;
+            lastLapTriggerAt = now;
+            if (!lapState.isRunning) {
+                lapState.isRunning = true;
+                lapState.startTime = now;
+                lapState.lapCount = 1;
+                lapState.topSpeedCurrentLap = currentPos.speed || 0;
+                lapState.minSpeedCurrentLap = Number.isFinite(currentPos.speed) ? Math.max(0, currentPos.speed) : null;
+                playChime(800, 0.2);
+                return;
+            }
+            const lapTimeMs = now - lapState.startTime;
+            if (lapTimeMs < 5000) return;
+            lapState.lastLapTime = lapTimeMs;
+            const isBest = !lapState.bestLapTime || lapTimeMs < lapState.bestLapTime;
+            if (isBest) lapState.bestLapTime = lapTimeMs;
+            const record = {
+                lapNumber: lapState.lapCount,
+                formattedTime: formatTime(lapTimeMs),
+                timeMs: lapTimeMs,
+                minSpeed: lapState.minSpeedCurrentLap === null ? 0 : lapState.minSpeedCurrentLap,
+                topSpeed: lapState.topSpeedCurrentLap,
+                peakLatG: Math.abs(gForce.lateral),
+                isBest
+            };
+            lapState.laps.push(record);
+            addLapToTable(record);
+            playChime(isBest ? 1200 : 880, 0.3);
+            lapState.lapCount++;
+            lapState.startTime = now;
+            lapState.topSpeedCurrentLap = currentPos.speed || 0;
+            lapState.minSpeedCurrentLap = Number.isFinite(currentPos.speed) ? Math.max(0, currentPos.speed) : null;
+        }
+
+        function setRefPointCurrent() {
+            if (appMode !== 'live' || gpsLastTimestamp === 0) {
+                alert('Ative o GPS real e aguarde uma posição válida antes de definir a linha de chegada.');
+                return;
+            }
+            activeTrack = {
+                ...activeTrack,
+                id: `custom_${Date.now()}`,
+                name: `${activeTrack.name} (linha ajustada)`,
+                finishLine: { lat: currentPos.lat, lng: currentPos.lng },
+                path: [{ lat: currentPos.lat, lng: currentPos.lng, targetSpeed: currentPos.speed }, ...activeTrack.path.slice(1)]
+            };
+            customTracks[activeTrack.id] = activeTrack;
+            if (!saveCustomTracksToStorage()) return;
+            updateTrackDropdown();
+            document.getElementById('selectTrack').value = activeTrack.id;
+            setRefPoint(currentPos.lat, currentPos.lng, activeTrack.tolerance);
+            lapState.isRunning = false;
+            lapState.insideZone = true;
+            lapArmed = false;
+            playChime(600, 0.1);
+        }
+
+        function toggleTrackRecording() {
+            if (appMode !== 'live') {
+                alert('Mude para GPS REAL antes de gravar uma pista.');
+                return;
+            }
+            if (!isRecordingTrack) {
+                if (gpsLastTimestamp === 0) {
+                    alert('Aguarde o GPS obter uma posição válida antes de iniciar a gravação.');
+                    return;
+                }
+                recordedPath = [{ lat: currentPos.lat, lng: currentPos.lng, targetSpeed: currentPos.speed }];
+                isRecordingTrack = true;
+                const btn = document.getElementById('btnStartRec');
+                btn.className = 'w-full py-2.5 bg-dashRed text-white font-black text-xs uppercase rounded-lg shadow glow-red flex items-center justify-center gap-2';
+                btn.textContent = 'CONCLUIR GRAVAÇÃO';
+                document.getElementById('lblRecStatus').classList.remove('hidden');
+                safeSetText('lblPointCount', '1');
+            } else {
+                isRecordingTrack = false;
+                const btn = document.getElementById('btnStartRec');
+                btn.className = 'w-full py-2.5 bg-dashGreen text-black font-black text-xs uppercase rounded-lg shadow glow-green flex items-center justify-center gap-2';
+                btn.textContent = 'INICIAR GRAVAÇÃO DE VOLTA';
+                document.getElementById('lblRecStatus').classList.add('hidden');
+                if (builderPolyline) builderPolyline.setLatLngs(recordedPath.map(p => [p.lat, p.lng]));
+                safeSetText('lblPointCount', String(recordedPath.length));
+                if (recordedPath.length < 3) alert('Poucos pontos registrados. Continue dirigindo até registrar um traçado suficiente.');
+            }
+        }
+
+        function saveCustomTrack() {
+            const name = document.getElementById('inputTrackName').value.trim() || `Circuito ${Object.keys(customTracks).length + 1}`;
+            const tolerance = Math.max(5, Math.min(35, Number(document.getElementById('inputTolerance').value) || 15));
+            let finalPath = [];
+            if (builderMode === 'manual') finalPath = manualPoints.slice();
+            else if (builderMode === 'rec') finalPath = recordedPath.slice();
+            if (finalPath.length < 3 || !finalPath.every(isValidCoordinate)) {
+                alert('Adicione pelo menos 3 pontos GPS válidos antes de salvar a pista.');
+                return;
+            }
+            const trackId = `custom_${Date.now()}`;
+            const newTrack = normalizeTrack({
+                id: trackId, name, tolerance,
+                finishLine: { lat: finalPath[0].lat, lng: finalPath[0].lng },
+                path: finalPath
+            }, trackId);
+            customTracks[trackId] = newTrack;
+            if (!saveCustomTracksToStorage()) { delete customTracks[trackId]; return; }
+            activeTrack = newTrack;
+            updateTrackDropdown();
+            changeTrack(trackId);
+            clearManualDrawing();
+            recordedPath = [];
+            closeTrackBuilder();
+            alert(`Pista "${name}" salva e ativada.`);
+        }
+
+        function importCustomTracksJSON(event) {
+            const file = event && event.target && event.target.files && event.target.files[0];
+            if (!file) return;
+            if (file.size > 5 * 1024 * 1024) {
+                alert('O arquivo é muito grande. O limite de importação é 5 MB.');
+                event.target.value = '';
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const imported = JSON.parse(reader.result);
+                    if (!imported || typeof imported !== 'object' || Array.isArray(imported)) throw new Error('Formato inválido');
+                    const valid = {};
+                    for (const [key, track] of Object.entries(imported)) {
+                        if (isValidTrack(track)) valid[String(track.id || key)] = normalizeTrack(track, key);
+                    }
+                    if (!Object.keys(valid).length) throw new Error('Nenhuma pista válida encontrada');
+                    const previous = { ...customTracks };
+                    customTracks = { ...customTracks, ...valid };
+                    if (!saveCustomTracksToStorage()) customTracks = previous;
+                    else {
+                        updateTrackDropdown();
+                        alert(`${Object.keys(valid).length} pista(s) importada(s) com sucesso.`);
+                    }
+                } catch (err) {
+                    alert(`Não foi possível importar as pistas: ${err.message}`);
+                } finally {
+                    event.target.value = '';
+                }
+            };
+            reader.onerror = () => alert('Erro ao ler o arquivo selecionado.');
+            reader.readAsText(file);
+        }
+
+        function clearLaps() {
+            lapState.laps = [];
+            lapState.lapCount = 0;
+            lapState.bestLapTime = null;
+            lapState.lastLapTime = null;
+            lapState.isRunning = false;
+            lapState.startTime = 0;
+            lapState.topSpeedCurrentLap = 0;
+            lapState.insideZone = false;
+            lapArmed = false;
+            lastLapTriggerAt = 0;
+            clearLapsDisplayOnly();
+        }
+
+        function exportCSV() {
+            if (!lapState.laps.length) {
+                alert('Ainda não há voltas para exportar.');
+                return;
+            }
+            const rows = [['Volta', 'Tempo', 'Tempo_ms', 'Velocidade_min_kmh', 'Velocidade_max_kmh', 'Forca_G_lateral']];
+            lapState.laps.forEach(l => rows.push([l.lapNumber, l.formattedTime, l.timeMs || '', Number(l.minSpeed ?? 0).toFixed(1), Number(l.topSpeed ?? 0).toFixed(1), Number(l.peakLatG).toFixed(2)]));
+            const csv = '\uFEFF' + rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(';')).join('\r\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `telemetria_${activeTrack.id}_${Date.now()}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        function exportCustomTracksJSON() {
+            const blob = new Blob([JSON.stringify(customTracks, null, 2)], { type: 'application/json;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `apex_pistas_${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        function openTrackBuilder() {
+            document.getElementById('modalTrackBuilder').classList.remove('hidden');
+            if (!builderMap) {
+                builderMap = L.map('builderMap', { zoomControl: true, attributionControl: true })
+                    .setView([currentPos.lat || activeTrack.finishLine.lat, currentPos.lng || activeTrack.finishLine.lng], 15);
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                    maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+                }).addTo(builderMap);
+                builderMap.on('click', handleBuilderMapClick);
+                builderPolyline = L.polyline([], { color: '#10b981', weight: 4 }).addTo(builderMap);
+            }
+            setTimeout(() => builderMap && builderMap.invalidateSize(), 100);
+        }
+
+        function initMap() {
+            if (!window.L) {
+                alert('Não foi possível carregar a biblioteca do mapa. Verifique a conexão com a internet e recarregue a página.');
+                return;
+            }
+            map = L.map('map', { zoomControl: false, attributionControl: true }).setView([activeTrack.finishLine.lat, activeTrack.finishLine.lng], 15);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+            }).addTo(map);
+            const carIcon = L.divIcon({
+                className: 'custom-car-icon',
+                html: '<div style="width:14px;height:14px;background:#0ea5e9;border:2px solid white;border-radius:50%;box-shadow:0 0 14px rgba(14,165,233,.8)"></div>',
+                iconSize: [14, 14], iconAnchor: [7, 7]
+            });
+            carMarker = L.marker([activeTrack.finishLine.lat, activeTrack.finishLine.lng], { icon: carIcon }).addTo(map);
+            trackPolyline = L.polyline([], { color: '#f59e0b', weight: 2, opacity: 0.85 }).addTo(map);
+            activeTrackRoute = L.polyline(activeTrack.path.map(p => [p.lat, p.lng]), {
+                color: '#0ea5e9', weight: 3, opacity: 0.8, dashArray: '6 5'
+            }).addTo(map);
+            setRefPoint(activeTrack.finishLine.lat, activeTrack.finishLine.lng, activeTrack.tolerance);
+        }
+
+        function setRefPoint(lat, lng, radius = 15) {
+            if (!map || !window.L) return;
+            if (refCircleMarker) map.removeLayer(refCircleMarker);
+            refCircleMarker = L.circle([lat, lng], {
+                color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.25, radius
+            }).addTo(map);
+        }
+
+        function requestWakeLock() {
+            if (!('wakeLock' in navigator)) {
+                safeSetText('wakeLockStatus', 'BLOQUEIO DE TELA NÃO SUPORTADO');
+                return;
+            }
+            navigator.wakeLock.request('screen').then(lock => {
+                wakeLock = lock;
+                safeSetText('wakeLockStatus', 'TELA ATIVA');
+                lock.addEventListener('release', () => safeSetText('wakeLockStatus', 'TELA PODE APAGAR'));
+            }).catch(() => safeSetText('wakeLockStatus', 'TELA PODE APAGAR'));
+        }
+
+        // Limpa os registros e mantém o cronômetro parado até a próxima passagem válida.
+        function clearLaps() {
+            lapState.laps = [];
+            lapState.lapCount = 0;
+            lapState.bestLapTime = null;
+            lapState.lastLapTime = null;
+            lapState.isRunning = false;
+            lapState.startTime = 0;
+            lapState.topSpeedCurrentLap = 0;
+            lapState.minSpeedCurrentLap = null;
+            // Evita reiniciar imediatamente se o veículo ainda estiver perto da linha de chegada.
+            lapState.insideZone = true;
+            lapArmed = false;
+            lastLapTriggerAt = Date.now();
+
+            const tbody = document.getElementById('lapTableBody');
+            if (tbody) {
+                tbody.innerHTML = '<tr id="emptyTableMsg"><td colspan="5" class="p-3 text-center text-gray-500">Nenhuma volta registrada</td></tr>';
+            }
+            safeSetText('valLapCount', '0');
+            safeSetText('valCurrentLap', '00:00.00');
+            safeSetText('valBestLap', '--:--.--');
+            safeSetText('valLastLap', '--:--.--');
+            safeSetText('valDelta', '--:--.--');
+            safeSetText('valDistRef', '-- m');
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && appMode === 'live' && !gpsWatchId) requestPermissions();
+            if (document.visibilityState === 'visible') requestWakeLock();
+        });
+
+    </script>
+</body>
+</html>
